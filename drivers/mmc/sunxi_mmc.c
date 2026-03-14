@@ -61,6 +61,7 @@ static bool sunxi_mmc_can_calibrate(void)
 	       IS_ENABLED(CONFIG_MACH_SUN50I_H5) ||
 	       IS_ENABLED(CONFIG_SUN50I_GEN_H6) ||
 	       IS_ENABLED(CONFIG_SUNXI_GEN_NCAT2) ||
+		   IS_ENABLED(CONFIG_MACH_SUN8I_A83T) ||
 	       IS_ENABLED(CONFIG_MACH_SUN8I_R40);
 }
 
