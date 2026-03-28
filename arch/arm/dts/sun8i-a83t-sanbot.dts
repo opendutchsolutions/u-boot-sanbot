@@ -1,0 +1,440 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Sanbot tablet — Allwinner A83T
+ * Based on sun8i-a83t-bananapi-m3.dts
+ * Corrections per script_keys dump and sun8i-a83t.dtsi cross-check
+ */
+
+/dts-v1/;
+#include "sun8i-a83t.dtsi"
+
+#include <dt-bindings/gpio/gpio.h>
+
+/ {
+	model = "Sanbot tablet";
+	compatible = "sanbot,sanbot-tablet", "allwinner,sun8i-a83t";
+
+	aliases {
+		/* ethernet0 removed — gmac_para empty */
+		serial0 = &uart0;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+
+	connector {
+		compatible = "hdmi-connector";
+		type = "a";
+
+		port {
+			hdmi_con_in: endpoint {
+				remote-endpoint = <&hdmi_out_con>;
+			};
+		};
+	};
+
+	/* leds removed — not in script_keys */
+
+	reg_usb1_vbus: reg-usb1-vbus {
+		compatible = "regulator-fixed";
+		regulator-name = "usb1-vbus";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		/* no GPIO — usbc1 has no usb_drv_vbus_gpio in script_keys */
+		regulator-always-on;
+	};
+
+	wifi_pwrseq: pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		clocks = <&ac100_rtc 1>;
+		clock-names = "ext_clock";
+		assigned-clocks = <&ac100_rtc 1>;
+		assigned-clock-rates = <32768>;
+		reset-gpios = <&r_pio 0 2 GPIO_ACTIVE_LOW>; /* PL2 wl_reg_on */
+	};
+
+	/* regulator-sata-disk-pwr removed — no SATA */
+
+	/*
+	 * PWM backlight
+	 * lcd_bl_en  = PD29, active high
+	 * lcd_pwm_ch = 0, lcd_pwm_freq = 10000 Hz → period = 100000 ns
+	 * lcd_pwm_pol = 1 → inverted → flags = 1
+	 */
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pwm 0 100000 1>;
+		brightness-levels = <0 10 20 30 40 50 60 70 80 90 100>;
+		default-brightness-level = <8>;
+		enable-gpios = <&pio 3 29 GPIO_ACTIVE_HIGH>; /* PD29 lcd_bl_en */
+	};
+
+	/*
+	 * Generic RGB panel driven via SSD2828 parallel-RGB-to-MIPI bridge.
+	 * U-Boot configures SSD2828 via SPI (CONFIG_VIDEO_LCD_SSD2828_*).
+	 * From the DTS pipeline perspective this is a plain parallel RGB panel.
+	 *
+	 * Timing from lcd0_para (verified):
+	 *   hactive=1920 htotal=2044 hbp=80  hspw=16 hfp=28
+	 *   vactive=1200 vtotal=1224 vbp=16  vspw=8  vfp=0
+	 *   pclk=150MHz, lcd_hv_clk_phase=1 → pixelclk-active=1
+	 *
+	 * lcd_gpio_5 = PL10 panel power — driven HIGH in board_init()
+	 * lcd_gpio_6 = PH4  panel enable — driven by enable-gpios below
+	 */
+	panel: panel {
+		compatible = "simple-panel";
+		enable-gpios = <&pio 7 4 GPIO_ACTIVE_HIGH>; /* PH4 lcd_gpio_6 */
+		backlight = <&backlight>;
+
+		port {
+			panel_input: endpoint {
+				remote-endpoint = <&tcon0_out_panel>;
+			};
+		};
+
+		panel-timing {
+			clock-frequency = <150000000>;
+			hactive = <1920>;
+			vactive = <1200>;
+			hfront-porch = <28>;
+			hback-porch = <80>;
+			hsync-len = <16>;
+			vfront-porch = <0>;
+			vback-porch = <16>;
+			vsync-len = <8>;
+			hsync-active = <0>;
+			vsync-active = <0>;
+			de-active = <1>;
+			pixelclk-active = <1>;
+		};
+	};
+};
+
+&cpu0 {
+	cpu-supply = <&reg_dcdc2>;
+};
+
+&cpu100 {
+	cpu-supply = <&reg_dcdc3>;
+};
+
+&de {
+	status = "okay";
+};
+
+&ehci0 {
+	status = "okay";
+};
+
+/* emac removed — gmac_para empty */
+
+&hdmi {
+	status = "okay";
+};
+
+&hdmi_out {
+	hdmi_out_con: endpoint {
+		remote-endpoint = <&hdmi_con_in>;
+	};
+};
+
+/* mdio/rgmii_phy removed — no ethernet */
+
+/*
+ * I2C0: touchscreen gslX680_T13hd
+ * ctp_twi_id=0, ctp_twi_addr=0x40
+ * Pinctrl already declared in DTSI — do NOT redeclare here
+ * IRQ: PL7 = r_pio bank 0 pin 7, #interrupt-cells=3
+ * WAKE: PL6 = r_pio bank 0 pin 6, active high
+ */
+&i2c0 {
+	status = "okay";
+
+	touchscreen@40 {
+		compatible = "silead,gsl1680";
+		reg = <0x40>;
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 7 IRQ_TYPE_EDGE_FALLING>; /* PL7 */
+		power-gpios = <&r_pio 0 6 GPIO_ACTIVE_HIGH>; /* PL6 wakeup */
+		touchscreen-size-x = <1920>;
+		touchscreen-size-y = <1200>;
+		touchscreen-swapped-x-y; /* ctp_exchange_x_y_flag=1 */
+		silead,max-fingers = <10>;
+	};
+};
+
+/* I2C1: gsensor_used=0 — disabled. Pinctrl already in DTSI */
+&i2c1 {
+	status = "disabled";
+};
+
+&mmc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc0_pins>;
+	vmmc-supply = <&reg_dcdc1>;
+	bus-width = <4>;
+	cd-gpios = <&pio 5 6 GPIO_ACTIVE_LOW>; /* PF6 sdc_det */
+	status = "okay";
+};
+
+&mmc1 {
+	/* pinctrl mmc1_pins already set in DTSI */
+	vmmc-supply = <&reg_dldo1>;
+	vqmmc-supply = <&reg_dldo1>;
+	mmc-pwrseq = <&wifi_pwrseq>;
+	bus-width = <4>;
+	non-removable;
+	status = "okay";
+
+	brcmf: wifi@1 {
+		reg = <1>;
+		compatible = "brcm,bcm4329-fmac"; /* TODO: verify chip */
+		interrupt-parent = <&r_pio>;
+		interrupts = <0 3 IRQ_TYPE_LEVEL_LOW>; /* PL3 wl_host_wake */
+		interrupt-names = "host-wake";
+	};
+};
+
+&mmc2 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&mmc2_8bit_emmc_pins>;
+	vmmc-supply = <&reg_dcdc1>;
+	vqmmc-supply = <&reg_dcdc1>;
+	bus-width = <8>;
+	non-removable;
+	cap-mmc-hw-reset;
+	status = "okay";
+};
+
+/*
+ * PWM0: PD28 confirmed by pwm_pin in sun8i-a83t.dtsi
+ * lcd_pwm_freq=10000Hz, lcd_pwm_pol=1 (inverted)
+ */
+&pwm {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm_pin>;
+	status = "okay";
+};
+
+&r_cir {
+	clock-frequency = <3000000>;
+	status = "okay";
+};
+
+&r_rsb {
+	status = "okay";
+
+	axp81x: pmic@3a3 {
+		compatible = "x-powers,axp813";
+		reg = <0x3a3>;
+		interrupt-parent = <&r_intc>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>; /* r_intc: #interrupt-cells=2 */
+		eldoin-supply = <&reg_dcdc1>;
+		fldoin-supply = <&reg_dcdc5>;
+		swin-supply = <&reg_dcdc1>;
+		x-powers,drive-vbus-en;
+	};
+
+	ac100: codec@e89 {
+		compatible = "x-powers,ac100";
+		reg = <0xe89>;
+
+		ac100_codec: codec {
+			compatible = "x-powers,ac100-codec";
+			interrupt-parent = <&r_pio>;
+			interrupts = <0 11 IRQ_TYPE_LEVEL_LOW>; /* PL11 */
+			#clock-cells = <0>;
+			clock-output-names = "4M_adda";
+		};
+
+		ac100_rtc: rtc {
+			compatible = "x-powers,ac100-rtc";
+			interrupt-parent = <&r_intc>;
+			interrupts = <0 IRQ_TYPE_LEVEL_LOW>; /* r_intc: #interrupt-cells=2 */
+			clocks = <&ac100_codec>;
+			#clock-cells = <1>;
+			clock-output-names = "cko1_rtc",
+					     "cko2_rtc",
+					     "cko3_rtc";
+		};
+	};
+};
+
+#include "axp81x.dtsi"
+
+&ac_power_supply {
+	status = "okay";
+};
+
+&battery_power_supply {
+	status = "okay";
+};
+
+/* ALDO1: 1800mV — PD domain (LCD data pins, gpio_bias pd_bias=aldo1:1800) */
+&reg_aldo1 {
+	regulator-always-on;
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "vcc-pd";
+};
+
+/* ALDO2: 1800mV */
+&reg_aldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <1800000>;
+	regulator-max-microvolt = <1800000>;
+	regulator-name = "dram-pll";
+};
+
+/* ALDO3: 3000mV — PL domain (PL10 panel power, WiFi/BT GPIOs) */
+&reg_aldo3 {
+	regulator-always-on;
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "vcc-pl";
+};
+
+/* DCDC1: 3000mV — all IO domains per gpio_bias. BPi M3 had 3300mV */
+&reg_dcdc1 {
+	regulator-always-on;
+	regulator-min-microvolt = <3000000>;
+	regulator-max-microvolt = <3000000>;
+	regulator-name = "vcc-3v0";
+};
+
+/* DCDC2: CPU cluster A — variable for DVFS */
+&reg_dcdc2 {
+	regulator-always-on;
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <1100000>;
+	regulator-name = "vdd-cpua";
+};
+
+/* DCDC3: CPU cluster B */
+&reg_dcdc3 {
+	regulator-always-on;
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <1100000>;
+	regulator-name = "vdd-cpub";
+};
+
+/* DCDC4: GPU */
+&reg_dcdc4 {
+	regulator-min-microvolt = <700000>;
+	regulator-max-microvolt = <1100000>;
+	regulator-name = "vdd-gpu";
+};
+
+/* DCDC5: 1200mV — LPDDR3 VDD */
+&reg_dcdc5 {
+	regulator-always-on;
+	regulator-min-microvolt = <1200000>;
+	regulator-max-microvolt = <1200000>;
+	regulator-name = "vcc-dram";
+};
+
+/* DCDC6: 900mV — system VDD */
+&reg_dcdc6 {
+	regulator-always-on;
+	regulator-min-microvolt = <900000>;
+	regulator-max-microvolt = <900000>;
+	regulator-name = "vdd-sys";
+};
+
+/* DLDO1: 2800mV — WiFi/BT. BPi M3 had 3300mV */
+&reg_dldo1 {
+	regulator-min-microvolt = <2800000>;
+	regulator-max-microvolt = <2800000>;
+	regulator-name = "vcc-wifi";
+};
+
+/* DLDO3: not overridden — absent from Sanbot power_sply */
+
+&reg_drivevbus {
+	regulator-name = "usb0-vbus";
+	status = "okay";
+};
+
+/* FLDO1: kept for USB HSIC */
+&reg_fldo1 {
+	regulator-min-microvolt = <1080000>;
+	regulator-max-microvolt = <1320000>;
+	regulator-name = "vdd12-hsic";
+};
+
+/* FLDO2: 900mV fixed. BPi M3 had variable range */
+&reg_fldo2 {
+	regulator-always-on;
+	regulator-min-microvolt = <900000>;
+	regulator-max-microvolt = <900000>;
+	regulator-name = "vdd-cpus";
+};
+
+&reg_rtc_ldo {
+	regulator-name = "vcc-rtc";
+};
+
+/* reg_sw removed — no ethernet PHY */
+
+/*
+ * TCON0: drives parallel RGB bus to SSD2828
+ * SSD2828 configured by U-Boot via SPI (CONFIG_VIDEO_LCD_SSD2828_*)
+ */
+&tcon0 {
+	status = "okay";
+};
+
+&tcon0_out {
+	tcon0_out_panel: endpoint {
+		remote-endpoint = <&panel_input>;
+	};
+};
+
+/* UART0: PB9(TX)/PB10(RX) — confirmed by uart_para */
+&uart0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart0_pb_pins>;
+	status = "okay";
+};
+
+/*
+ * UART1: Bluetooth
+ * bt_wake = PH5 (pio 7 5) — was PH9 on BPi M3
+ * bt_host_wake = PL5, bt_rst_n = PL4
+ */
+&uart1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&uart1_pins>, <&uart1_rts_cts_pins>;
+	uart-has-rtscts;
+	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt"; /* TODO: verify chip */
+		clocks = <&ac100_rtc 1>;
+		clock-names = "lpo";
+		vbat-supply = <&reg_dldo1>;
+		vddio-supply = <&reg_dldo1>;
+		device-wakeup-gpios = <&pio 7 5 GPIO_ACTIVE_HIGH>;  /* PH5 bt_wake */
+		host-wakeup-gpios = <&r_pio 0 5 GPIO_ACTIVE_HIGH>;  /* PL5 bt_host_wake */
+		shutdown-gpios = <&r_pio 0 4 GPIO_ACTIVE_HIGH>;     /* PL4 bt_rst_n */
+	};
+};
+
+&usb_otg {
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&usb_power_supply {
+	status = "okay";
+};
+
+&usbphy {
+	usb0_id_det-gpios = <&pio 7 11 GPIO_ACTIVE_HIGH>; /* PH11 */
+	usb0_vbus_power-supply = <&usb_power_supply>;
+	usb0_vbus-supply = <&reg_drivevbus>;
+	usb1_vbus-supply = <&reg_usb1_vbus>;
+	status = "okay";
+};
